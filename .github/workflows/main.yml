@@ -1,0 +1,56 @@
+name: Run Chemistry Scraper
+
+on:
+  workflow_dispatch: # Allows you to run the scraper manually
+
+permissions:
+  contents: write # Allows the runner to commit and push to your repo
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Check out the repository
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    # 2. Set up Python
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 3. Install required libraries
+    - name: Install Dependencies
+      run: |
+        python -m pip install requests
+
+    # 4. Run the scraper
+    - name: Run Scraper
+      run: |
+        python scraper.py
+
+    # 5. Commit and Push Changes (Runs only if the scraper finishes successfully)
+    - name: Commit and Push Changes to Repo
+      if: success()
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add data/
+        
+        if git diff --quiet && git diff --staged --quiet; then
+          echo "No new changes to commit"
+        else
+          git commit -m "Automated update: Added scraped chemistry data"
+          git push
+        fi
+
+    # 6. Upload data as an Artifact (Runs ALWAYS, even if the scraper crashes or is stopped)
+    - name: Upload Data as Artifact
+      uses: actions/upload-artifact@v4
+      if: always() # Ensures backup is saved even if the job fails or is cancelled
+      with:
+        name: chemistry-scraped-data-backup
+        path: data/
+        retention-days: 30 # Keeps the zip file download available for 30 days
