@@ -29,7 +29,7 @@ jobs:
     # 4. Run the scraper
     - name: Run Scraper
       run: |
-        python scraper.py
+        python -u scraper.py
 
     # 5. Commit and Push Changes (Runs only if the scraper finishes successfully)
     - name: Commit and Push Changes to Repo
