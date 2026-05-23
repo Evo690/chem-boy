@@ -48,6 +48,62 @@ def make_request(url, params=None):
         return None
 
 
+def download_image(url, save_dir):
+    """Downloads an image file and returns its safe local filename."""
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Extract filename from URL (remove query parameters if any)
+    raw_filename = url.split("/")[-1].split("?")[0]
+    filename = clean_name(raw_filename)
+    file_path = os.path.join(save_dir, filename)
+
+    # Skip if already downloaded
+    if os.path.exists(file_path):
+        return filename
+
+    # Brief pause to prevent rate-limiting on image assets
+    time.sleep(0.1)
+    try:
+        r = requests.get(url, headers={"User-Agent": HEADERS["User-Agent"]}, stream=True, timeout=15)
+        if r.status_code == 200:
+            with open(file_path, "wb") as f:
+                for chunk in r.iter_content(1024):
+                    f.write(chunk)
+            return filename
+    except Exception as e:
+        print(f"\n[Warning] Failed to download image {url}: {e}")
+    return None
+
+
+def process_text_images(text, save_dir):
+    """Finds image URLs in HTML tags, downloads them, and replaces URLs with relative paths."""
+    if not text:
+        return text
+
+    # Matches both src="url" and src='url'
+    urls = re.findall(r'src=["\'](https?://[^"\']+)["\']', text)
+
+    for url in urls:
+        # Only download assets from the host to prevent grabbing external tracking pixels/URLs
+        if "getmarks.app" in url:
+            filename = download_image(url, save_dir)
+            if filename:
+                local_relative_path = f"../images/{filename}"
+                text = text.replace(url, local_relative_path)
+    return text
+
+
+def process_direct_image(url, save_dir):
+    """Downloads a standalone image URL and returns its relative path."""
+    if not url:
+        return None
+    if "getmarks.app" in url:
+        filename = download_image(url, save_dir)
+        if filename:
+            return f"../images/{filename}"
+    return url
+
+
 def fetch_subjects():
     """Dynamically fetches active subjects for the exam."""
     url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}"
@@ -79,11 +135,9 @@ def fetch_subjects():
 def fetch_chapters(subject_id):
     """Fetches all chapters for the given subject ID."""
     url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}/subject/{subject_id}"
-    
-    # Matching the browser's parameters exactly
     params = {
         "platform": "web",
-        "limit": 50,  # Requesting more than 25 to get all chapters in one go
+        "limit": 50,
         "offset": 0,
         "sortBy": "order",
         "syllabusCategory": "asPerSyllabus",
@@ -102,27 +156,13 @@ def fetch_chapters(subject_id):
         print(f"  [Debug] Chapter API returned success=False. Full response: {json.dumps(data)}")
         return []
         
-    # Checking where 'chapters' is hiding
     root_chapters = data.get("chapters", {})
     inner_data_chapters = data.get("data", {}).get("chapters", {})
     
-    # 1. Check if it's at the root (like your browser paste)
     if root_chapters:
-        print("  [Debug] Found 'chapters' at root level.")
         return root_chapters.get("data", [])
-        
-    # 2. Check if it's nested inside 'data'
     elif inner_data_chapters:
-        print("  [Debug] Found 'chapters' nested inside 'data'.")
         return inner_data_chapters.get("data", [])
-        
-    # 3. If missing in both, print keys to locate it
-    else:
-        print("  [Debug] 'chapters' key was missing from both root and inner 'data'.")
-        print(f"  [Debug] Root Keys: {list(data.keys())}")
-        print(f"  [Debug] Inner 'data' Keys: {list(data.get('data', {}).keys())}")
-        if "message" in data:
-            print(f"  [Debug] Message from server: {data['message']}")
             
     return []
 
@@ -137,11 +177,14 @@ def fetch_topics(subject_id, chapter_id):
     return []
 
 
-def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
-    """Fetches and processes questions directly inside the loop."""
+def fetch_and_clean_questions(subject_id, subject_title, chapter_id, topic_id):
+    """Fetches, cleans, and downloads images for the questions in a topic."""
     cleaned_questions = []
     limit = 25
     offset = 0
+    
+    # Path to save images (e.g. data/Physics/images/)
+    images_dir = os.path.join("data", subject_title, "images")
 
     while True:
         url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}/subject/{subject_id}/chapter/{chapter_id}/topic/{topic_id}/questions"
@@ -161,17 +204,38 @@ def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
         for q in q_list:
             q_type = q.get("type")
             q_text = q.get("question", {}).get("text")
+            q_img = q.get("question", {}).get("image")
             sol_text = q.get("solution", {}).get("text")
+            sol_img = q.get("solution", {}).get("image")
+
+            # A. Process standalone/nested images in question & solution
+            q_text = process_text_images(q_text, images_dir)
+            q_img = process_direct_image(q_img, images_dir)
+            sol_text = process_text_images(sol_text, images_dir)
+            sol_img = process_direct_image(sol_img, images_dir)
 
             cleaned_options = []
             correct_ans = None
 
+            # B. Handle Numerical type answers
             if q_type == "numerical":
                 correct_ans = q.get("correctValue")
+            # C. Handle Multiple Choice answers
             else:
                 for opt in q.get("options", []):
+                    opt_text = opt.get("text")
+                    opt_img = opt.get("image")
+
+                    # Process images inside options
+                    opt_text = process_text_images(opt_text, images_dir)
+                    opt_img = process_direct_image(opt_img, images_dir)
+
                     cleaned_options.append(
-                        {"id": opt.get("id"), "text": opt.get("text")}
+                        {
+                            "id": opt.get("id"), 
+                            "text": opt_text,
+                            "image": opt_img
+                        }
                     )
                     if opt.get("isCorrect") is True:
                         correct_ans = opt.get("id")
@@ -180,9 +244,11 @@ def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
                 {
                     "type": q_type,
                     "question": q_text,
+                    "image": q_img,
                     "options": cleaned_options,
                     "correct_answer": correct_ans,
                     "solution": sol_text,
+                    "solution_image": sol_img
                 }
             )
 
@@ -261,8 +327,8 @@ def main():
 
                 print(f"  [{topic_idx}/{len(topics)}] Topic: {topic_title_clean}")
 
-                # 5. Fetch and clean questions directly
-                topic_questions = fetch_and_clean_questions(subject_id, chap_id, topic_id)
+                # 5. Fetch, clean, and download images
+                topic_questions = fetch_and_clean_questions(subject_id, subject_title, chap_id, topic_id)
 
                 # 6. Save Topic JSON inside the Chapter Folder
                 if topic_questions:
