@@ -8,13 +8,6 @@ import requests
 EXAM_ID = "615f0e999476412f48314daf"  # JEE Main
 DELAY = 0.6
 
-# Subject mapping
-SUBJECTS = [
-    {"id": "615f0c729476412f48314dab", "title": "Physics"},
-    {"id": "615f0cf69476412f48314dac", "title": "Chemistry"},
-    {"id": "615f0d109476412f48314dad", "title": "Mathematics"}
-]
-
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4MzIwOGM3NzZhN2FiNTAxYjk0MGUzMSIsImlhdCI6MTc3OTUyMjQ2OSwiZXhwIjoxNzgyMTE0NDY5fQ.WYb5Fevk6IycFBEKh_W6L1CXZk09aeC2lhIqkufbdb8"
 
 HEADERS = {
@@ -44,8 +37,40 @@ def make_request(url, params=None):
             print(f"\n[Error] HTTP {response.status_code} for URL: {url}")
             return None
     except Exception as e:
-        print(f"\n[Exception] Failed to connect: {e}")
+        print(f"\n[Exception] Failed to connect/parse JSON: {e}")
         return None
+
+
+def fetch_subjects():
+    """Dynamically fetches active subjects for the exam."""
+    url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}"
+    params = {"platform": "web"}
+    print("Fetching subjects list dynamically...")
+    
+    data = make_request(url, params)
+    
+    if not data:
+        print("  [Debug] Subject request failed completely (make_request returned None).")
+        return []
+        
+    if not data.get("success"):
+        print(f"  [Debug] Subject API returned success=False. Response: {json.dumps(data)}")
+        return []
+        
+    subjects_list = data.get("data", {}).get("subjects", [])
+    
+    cleaned_subjects = []
+    for sub in subjects_list:
+        sub_id = sub.get("_id")
+        sub_title = sub.get("title")
+        if sub_id and sub_title:
+            cleaned_subjects.append({"id": sub_id, "title": sub_title})
+            
+    if not cleaned_subjects:
+        print("  [Debug] Dynamic subject list is empty or incorrectly formatted.")
+        print(f"  [Debug] Keys in root response: {list(data.keys())}")
+        
+    return cleaned_subjects
 
 
 def fetch_chapters(subject_id):
@@ -53,10 +78,27 @@ def fetch_chapters(subject_id):
     url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}/subject/{subject_id}"
     params = {"platform": "web", "limit": 100, "offset": 0}
     print(f"Fetching chapters list for subject {subject_id}...")
+    
     data = make_request(url, params)
-    if data and data.get("success"):
-        return data.get("chapters", {}).get("data", [])
-    return []
+    
+    if not data:
+        print(f"  [Debug] Chapter request failed completely.")
+        return []
+        
+    if not data.get("success"):
+        print(f"  [Debug] Chapter API returned success=False. Full response: {json.dumps(data)}")
+        return []
+        
+    chapters_obj = data.get("chapters", {})
+    chapters_data = chapters_obj.get("data", [])
+    
+    if not chapters_data:
+        print(f"  [Debug] API returned success=True, but 'chapters.data' is empty.")
+        print(f"  [Debug] Keys in root response: {list(data.keys())}")
+        if "message" in data:
+            print(f"  [Debug] Message from server: {data['message']}")
+            
+    return chapters_data
 
 
 def fetch_topics(subject_id, chapter_id):
@@ -70,7 +112,7 @@ def fetch_topics(subject_id, chapter_id):
 
 
 def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
-    """Fetches and processes questions directly inside the loop (no extra detail endpoint needed)."""
+    """Fetches and processes questions directly inside the loop."""
     cleaned_questions = []
     limit = 25
     offset = 0
@@ -98,10 +140,8 @@ def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
             cleaned_options = []
             correct_ans = None
 
-            # 1. Handle Numerical type answers
             if q_type == "numerical":
                 correct_ans = q.get("correctValue")
-            # 2. Handle Multiple Choice answers
             else:
                 for opt in q.get("options", []):
                     cleaned_options.append(
@@ -130,13 +170,18 @@ def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
 
 
 def main():
-    print(f"Starting Scraper for {len(SUBJECTS)} subjects...")
+    # 1. Fetch Subjects Dynamically
+    subjects = fetch_subjects()
+    if not subjects:
+        print("Could not retrieve active subjects list. Stopping.")
+        return
 
-    for subject_entry in SUBJECTS:
+    print(f"Starting Scraper for {len(subjects)} dynamically fetched subjects...")
+
+    for subject_entry in subjects:
         subject_id = subject_entry["id"]
         subject_title = subject_entry["title"]
 
-        # 1. Subject Base Directory (e.g., data/Physics, data/Chemistry, data/Mathematics)
         base_dir = os.path.join("data", subject_title)
         os.makedirs(base_dir, exist_ok=True)
 
@@ -182,7 +227,6 @@ def main():
                 topic_title_clean = clean_name(raw_topic_title)
                 file_path = os.path.join(chap_dir, f"{topic_title_clean}.json")
 
-                # Skip if this topic has already been successfully scraped
                 if os.path.exists(file_path):
                     print(
                         f"  [{topic_idx}/{len(topics)}] Skipping (Already Scraped): {topic_title_clean}"
