@@ -8,6 +8,13 @@ import requests
 EXAM_ID = "615f0e999476412f48314daf"  # JEE Main
 DELAY = 0.6
 
+# Subject mapping
+SUBJECTS = [
+    {"id": "615f0c729476412f48314dab", "title": "Physics"},
+    {"id": "615f0cf69476412f48314dac", "title": "Chemistry"},
+    {"id": "615f0d109476412f48314dad", "title": "Mathematics"}
+]
+
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4MzIwOGM3NzZhN2FiNTAxYjk0MGUzMSIsImlhdCI6MTc3OTUyMjQ2OSwiZXhwIjoxNzgyMTE0NDY5fQ.WYb5Fevk6IycFBEKh_W6L1CXZk09aeC2lhIqkufbdb8"
 
 HEADERS = {
@@ -50,7 +57,7 @@ def fetch_subjects():
     data = make_request(url, params)
     
     if not data:
-        print("  [Debug] Subject request failed completely (make_request returned None).")
+        print("  [Debug] Subject request failed completely.")
         return []
         
     if not data.get("success"):
@@ -66,17 +73,23 @@ def fetch_subjects():
         if sub_id and sub_title:
             cleaned_subjects.append({"id": sub_id, "title": sub_title})
             
-    if not cleaned_subjects:
-        print("  [Debug] Dynamic subject list is empty or incorrectly formatted.")
-        print(f"  [Debug] Keys in root response: {list(data.keys())}")
-        
     return cleaned_subjects
 
 
 def fetch_chapters(subject_id):
     """Fetches all chapters for the given subject ID."""
     url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}/subject/{subject_id}"
-    params = {"platform": "web", "limit": 100, "offset": 0}
+    
+    # Matching the browser's parameters exactly
+    params = {
+        "platform": "web",
+        "limit": 50,  # Requesting more than 25 to get all chapters in one go
+        "offset": 0,
+        "sortBy": "order",
+        "syllabusCategory": "asPerSyllabus",
+        "unit": "all",
+        "subjectClass": "all"
+    }
     print(f"Fetching chapters list for subject {subject_id}...")
     
     data = make_request(url, params)
@@ -89,16 +102,29 @@ def fetch_chapters(subject_id):
         print(f"  [Debug] Chapter API returned success=False. Full response: {json.dumps(data)}")
         return []
         
-    chapters_obj = data.get("chapters", {})
-    chapters_data = chapters_obj.get("data", [])
+    # Checking where 'chapters' is hiding
+    root_chapters = data.get("chapters", {})
+    inner_data_chapters = data.get("data", {}).get("chapters", {})
     
-    if not chapters_data:
-        print(f"  [Debug] API returned success=True, but 'chapters.data' is empty.")
-        print(f"  [Debug] Keys in root response: {list(data.keys())}")
+    # 1. Check if it's at the root (like your browser paste)
+    if root_chapters:
+        print("  [Debug] Found 'chapters' at root level.")
+        return root_chapters.get("data", [])
+        
+    # 2. Check if it's nested inside 'data'
+    elif inner_data_chapters:
+        print("  [Debug] Found 'chapters' nested inside 'data'.")
+        return inner_data_chapters.get("data", [])
+        
+    # 3. If missing in both, print keys to locate it
+    else:
+        print("  [Debug] 'chapters' key was missing from both root and inner 'data'.")
+        print(f"  [Debug] Root Keys: {list(data.keys())}")
+        print(f"  [Debug] Inner 'data' Keys: {list(data.get('data', {}).keys())}")
         if "message" in data:
             print(f"  [Debug] Message from server: {data['message']}")
             
-    return chapters_data
+    return []
 
 
 def fetch_topics(subject_id, chapter_id):
