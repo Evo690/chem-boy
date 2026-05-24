@@ -22,8 +22,16 @@ HEADERS = {
 
 
 def clean_name(name):
-    """Removes invalid characters to make a safe directory or file name."""
-    return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+    """Removes invalid characters, newlines, and carriage returns to make a safe filename."""
+    if not name:
+        return name
+    # Replace newlines, carriage returns, and tabs with a space
+    name = name.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # Replace OS-specific illegal characters with an underscore
+    name = re.sub(r'[\\/*?:"<>|]', "_", name)
+    # Collapse multiple spaces into a single space
+    name = re.sub(r'\s+', ' ', name)
+    return name.strip()
 
 
 def make_request(url, params=None):
