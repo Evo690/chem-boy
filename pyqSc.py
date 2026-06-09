@@ -4,16 +4,9 @@ import re
 import time
 import requests
 
-# Hardcoded configurations
-EXAM_ID = "615f0e999476412f48314daf"  # JEE Main
-DELAY = 0.6
-
-# Subject mapping
-SUBJECTS = [
-    {"id": "615f0c729476412f48314dab", "title": "Physics"},
-    {"id": "615f0cf69476412f48314dac", "title": "Chemistry"},
-    {"id": "615f0d109476412f48314dad", "title": "Mathematics"}
-]
+# Hardcoded configurations for JEE Advanced
+EXAM_ID = "616059150283de43c87e3e21"  
+DELAY = 0.2
 
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4MzIwOGM3NzZhN2FiNTAxYjk0MGUzMSIsImlhdCI6MTc3OTUyMjQ2OSwiZXhwIjoxNzgyMTE0NDY5fQ.WYb5Fevk6IycFBEKh_W6L1CXZk09aeC2lhIqkufbdb8"
 
@@ -29,8 +22,13 @@ HEADERS = {
 
 
 def clean_name(name):
-    """Removes invalid characters to make a safe directory or file name."""
-    return re.sub(r'[\\/*?:"<>|]', "_", name).strip()
+    """Removes invalid characters, newlines, and carriage returns to make a safe filename."""
+    if not name:
+        return name
+    name = name.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    name = re.sub(r'[\\/*?:"<>|]', "_", name)
+    name = re.sub(r'\s+', ' ', name)
+    return name.strip()
 
 
 def make_request(url, params=None):
@@ -46,62 +44,6 @@ def make_request(url, params=None):
     except Exception as e:
         print(f"\n[Exception] Failed to connect/parse JSON: {e}")
         return None
-
-
-def download_image(url, save_dir):
-    """Downloads an image file and returns its safe local filename."""
-    os.makedirs(save_dir, exist_ok=True)
-    
-    # Extract filename from URL (remove query parameters if any)
-    raw_filename = url.split("/")[-1].split("?")[0]
-    filename = clean_name(raw_filename)
-    file_path = os.path.join(save_dir, filename)
-
-    # Skip if already downloaded
-    if os.path.exists(file_path):
-        return filename
-
-    # Brief pause to prevent rate-limiting on image assets
-    time.sleep(0.1)
-    try:
-        r = requests.get(url, headers={"User-Agent": HEADERS["User-Agent"]}, stream=True, timeout=15)
-        if r.status_code == 200:
-            with open(file_path, "wb") as f:
-                for chunk in r.iter_content(1024):
-                    f.write(chunk)
-            return filename
-    except Exception as e:
-        print(f"\n[Warning] Failed to download image {url}: {e}")
-    return None
-
-
-def process_text_images(text, save_dir):
-    """Finds image URLs in HTML tags, downloads them, and replaces URLs with relative paths."""
-    if not text:
-        return text
-
-    # Matches both src="url" and src='url'
-    urls = re.findall(r'src=["\'](https?://[^"\']+)["\']', text)
-
-    for url in urls:
-        # Only download assets from the host to prevent grabbing external tracking pixels/URLs
-        if "getmarks.app" in url:
-            filename = download_image(url, save_dir)
-            if filename:
-                local_relative_path = f"../images/{filename}"
-                text = text.replace(url, local_relative_path)
-    return text
-
-
-def process_direct_image(url, save_dir):
-    """Downloads a standalone image URL and returns its relative path."""
-    if not url:
-        return None
-    if "getmarks.app" in url:
-        filename = download_image(url, save_dir)
-        if filename:
-            return f"../images/{filename}"
-    return url
 
 
 def fetch_subjects():
@@ -153,7 +95,7 @@ def fetch_chapters(subject_id):
         return []
         
     if not data.get("success"):
-        print(f"  [Debug] Chapter API returned success=False. Full response: {json.dumps(data)}")
+        print(f"  [Debug] Chapter API returned success=False.")
         return []
         
     root_chapters = data.get("chapters", {})
@@ -177,14 +119,11 @@ def fetch_topics(subject_id, chapter_id):
     return []
 
 
-def fetch_and_clean_questions(subject_id, subject_title, chapter_id, topic_id):
-    """Fetches, cleans, and downloads images for the questions in a topic."""
+def fetch_and_clean_questions(subject_id, chapter_id, topic_id):
+    """Fetches questions and extracts all available properties (skips downloading images)."""
     cleaned_questions = []
     limit = 25
     offset = 0
-    
-    # Path to save images (e.g. data/Physics/images/)
-    images_dir = os.path.join("data", subject_title, "images")
 
     while True:
         url = f"https://web.getmarks.app/api/v4/cpyqb/exam/{EXAM_ID}/subject/{subject_id}/chapter/{chapter_id}/topic/{topic_id}/questions"
@@ -202,39 +141,39 @@ def fetch_and_clean_questions(subject_id, subject_title, chapter_id, topic_id):
         q_list = data.get("data", {}).get("questions", [])
 
         for q in q_list:
+            q_id = q.get("_id")
             q_type = q.get("type")
+            q_difficulty = q.get("level")  # Difficulty (integer level)
+            q_syllabus = q.get("syllabusCategory")  # Syllabus category (e.g. noChange)
+            q_structure = q.get("questionStructure")  # Question layout structure
+
+            # Get Year/Paper metadata
+            year_obj = q.get("previousYear")
+            if not year_obj and q.get("previousYearPapers"):
+                year_obj = q.get("previousYearPapers")[0]
+            
+            q_year_title = year_obj.get("title") if year_obj else None
+            q_year_short = year_obj.get("shortName") if year_obj else None
+            q_held_on = year_obj.get("heldOn") if year_obj else None
+
+            # Base question & solution content (keeping remote URLs)
             q_text = q.get("question", {}).get("text")
             q_img = q.get("question", {}).get("image")
             sol_text = q.get("solution", {}).get("text")
             sol_img = q.get("solution", {}).get("image")
 
-            # A. Process standalone/nested images in question & solution
-            q_text = process_text_images(q_text, images_dir)
-            q_img = process_direct_image(q_img, images_dir)
-            sol_text = process_text_images(sol_text, images_dir)
-            sol_img = process_direct_image(sol_img, images_dir)
-
             cleaned_options = []
             correct_ans = None
 
-            # B. Handle Numerical type answers
             if q_type == "numerical":
                 correct_ans = q.get("correctValue")
-            # C. Handle Multiple Choice answers
             else:
                 for opt in q.get("options", []):
-                    opt_text = opt.get("text")
-                    opt_img = opt.get("image")
-
-                    # Process images inside options
-                    opt_text = process_text_images(opt_text, images_dir)
-                    opt_img = process_direct_image(opt_img, images_dir)
-
                     cleaned_options.append(
                         {
                             "id": opt.get("id"), 
-                            "text": opt_text,
-                            "image": opt_img
+                            "text": opt.get("text"),
+                            "image": opt.get("image")  # Keep original image URL
                         }
                     )
                     if opt.get("isCorrect") is True:
@@ -242,12 +181,19 @@ def fetch_and_clean_questions(subject_id, subject_title, chapter_id, topic_id):
 
             cleaned_questions.append(
                 {
+                    "question_id": q_id,
                     "type": q_type,
-                    "question": q_text,
-                    "image": q_img,
+                    "difficulty_level": q_difficulty,
+                    "syllabus_category": q_syllabus,
+                    "question_structure": q_structure,
+                    "paper_year_title": q_year_title,
+                    "paper_year_short": q_year_short,
+                    "held_on": q_held_on,
+                    "question_text": q_text,
+                    "question_image": q_img,
                     "options": cleaned_options,
                     "correct_answer": correct_ans,
-                    "solution": sol_text,
+                    "solution_text": sol_text,
                     "solution_image": sol_img
                 }
             )
@@ -274,11 +220,12 @@ def main():
         subject_id = subject_entry["id"]
         subject_title = subject_entry["title"]
 
-        base_dir = os.path.join("data", subject_title)
+        # Subject Base Directory under JEE_Advanced folder
+        base_dir = os.path.join("data", "JEE_Advanced", subject_title)
         os.makedirs(base_dir, exist_ok=True)
 
         print(f"\n==========================================")
-        print(f"PROCESSING SUBJECT: {subject_title.upper()}")
+        print(f"PROCESSING ADVANCED SUBJECT: {subject_title.upper()}")
         print(f"==========================================")
 
         # 2. Get Chapters
@@ -327,8 +274,8 @@ def main():
 
                 print(f"  [{topic_idx}/{len(topics)}] Topic: {topic_title_clean}")
 
-                # 5. Fetch, clean, and download images
-                topic_questions = fetch_and_clean_questions(subject_id, subject_title, chap_id, topic_id)
+                # 5. Fetch and clean questions
+                topic_questions = fetch_and_clean_questions(subject_id, chap_id, topic_id)
 
                 # 6. Save Topic JSON inside the Chapter Folder
                 if topic_questions:
