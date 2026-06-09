@@ -6,7 +6,7 @@ import requests
 
 # Hardcoded configurations for JEE Advanced
 EXAM_ID = "616059150283de43c87e3e21"  
-DELAY = 0.2
+DELAY = 0.6
 
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4MzIwOGM3NzZhN2FiNTAxYjk0MGUzMSIsImlhdCI6MTc3OTUyMjQ2OSwiZXhwIjoxNzgyMTE0NDY5fQ.WYb5Fevk6IycFBEKh_W6L1CXZk09aeC2lhIqkufbdb8"
 
@@ -44,6 +44,44 @@ def make_request(url, params=None):
     except Exception as e:
         print(f"\n[Exception] Failed to connect/parse JSON: {e}")
         return None
+
+
+def download_chapter_icon(icon_name, save_dir):
+    """Downloads the chapter-specific SVG icon using specific request headers."""
+    if not icon_name:
+        return
+    os.makedirs(save_dir, exist_ok=True)
+    file_path = os.path.join(save_dir, icon_name)
+
+    # Skip if already downloaded
+    if os.path.exists(file_path):
+        return
+
+    url = f"https://web.getmarks.app/icons/exam/{icon_name}"
+    
+    # Specific headers replicated from your curl call
+    img_headers = {
+        "User-Agent": HEADERS["User-Agent"],
+        "Accept": "image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://web.getmarks.app/cpyqbV3/exam/615f0e999476412f48314daf",
+        "Sec-Fetch-Dest": "image",
+        "Sec-Fetch-Mode": "no-cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Priority": "u=5, i",
+        "TE": "trailers"
+    }
+
+    time.sleep(0.1)
+    try:
+        r = requests.get(url, headers=img_headers, stream=True, timeout=15)
+        if r.status_code == 200:
+            with open(file_path, "wb") as f:
+                for chunk in r.iter_content(1024):
+                    f.write(chunk)
+            print(f"    Downloaded Chapter Icon: {icon_name}")
+    except Exception as e:
+        print(f"\n[Warning] Failed to download chapter icon {icon_name}: {e}")
 
 
 def fetch_subjects():
@@ -240,6 +278,7 @@ def main():
         for chap_idx, chap in enumerate(chapters, start=1):
             chap_id = chap.get("_id")
             raw_chap_title = chap.get("title", f"Chapter_{chap_idx}")
+            icon_name = chap.get("icon")
 
             if not chap_id:
                 continue
@@ -251,6 +290,11 @@ def main():
             print(
                 f"\n--- [{subject_title}] [{chap_idx}/{len(chapters)}] Chapter: {chap_title_clean} ---"
             )
+
+            # Download the Chapter SVG Icon
+            if icon_name:
+                icons_dir = os.path.join(base_dir, "icons")
+                download_chapter_icon(icon_name, icons_dir)
 
             # 4. Get Topics inside Chapter
             topics = fetch_topics(subject_id, chap_id)
