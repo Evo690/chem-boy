@@ -6,7 +6,7 @@ import requests
 
 # Hardcoded configurations for JEE Advanced
 EXAM_ID = "616059150283de43c87e3e21"  
-DELAY = 0.6
+DELAY = 0.1
 
 AUTH_TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4MzIwOGM3NzZhN2FiNTAxYjk0MGUzMSIsImlhdCI6MTc3OTUyMjQ2OSwiZXhwIjoxNzgyMTE0NDY5fQ.WYb5Fevk6IycFBEKh_W6L1CXZk09aeC2lhIqkufbdb8"
 
