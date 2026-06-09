@@ -1,4 +1,4 @@
-name: Run Physics PYQ Scraper
+name: Run Physics PYQ Light Scraper
 
 on:
   workflow_dispatch: # Allows you to run the scraper manually from the Actions tab
@@ -26,13 +26,13 @@ jobs:
     # 4. Run the scraper with unbuffered output (-u)
     - name: Run Scraper
       run: |
-        python -u pyqSc.py
+        python -u pyqLightSc.py
 
     # 5. Upload data as an Artifact (Runs ALWAYS, even if the scraper crashes or is stopped)
     - name: Upload Data as Artifact
       uses: actions/upload-artifact@v4
       if: always() # Ensures backup is saved even if the job fails or is cancelled
       with:
-        name: subjects-pyq-scraped-data
+        name: advanced-subjects-light-pyq-scraped-data
         path: data/
         retention-days: 30 # Keeps the zip file download available for 30 days
